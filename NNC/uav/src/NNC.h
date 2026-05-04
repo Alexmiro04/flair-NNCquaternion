@@ -15,9 +15,7 @@
 
 #include <UavStateMachine.h>
 #include "myCtrl.h"
-#include "Sliding.h"
 #include <Vector2D.h>
-#include <array>
 
 namespace flair {
     namespace gui {
@@ -64,8 +62,7 @@ class NNC : public flair::meta::UavStateMachine {
 
     enum class ControlMode_t {
             Default, 
-            Custom,
-            Sliding
+            Custom
     };
 
         BehaviourMode_t behaviourMode;
@@ -89,15 +86,12 @@ class NNC : public flair::meta::UavStateMachine {
         void StopCustomTorques(void);
         void StartDefaultTorques(void);
         void computeMyCtrl(flair::core::Euler &torques);
-        void computeSlidingCtrl(flair::core::Euler &torques);
         void applyEscMotorFailure(void);
         void clearEscMotorFailure(void);
-        void applyVirtualMotorFailureToControl(flair::core::Euler &torques);
 
 
         flair::filter::Pid *uX, *uY;
         flair::filter::MyController *myCtrl;
-        flair::filter::Sliding *slidingCtrl;
 
         flair::core::Vector2Df posHold;
         float yawHold;
@@ -116,7 +110,6 @@ class NNC : public flair::meta::UavStateMachine {
         // Custom control law
         flair::gui::DoubleSpinBox *deltaT_custom;
         flair::gui::Tab *setup_custom_controller, *graphs_custom_controller, *xy_weights_custom_controller;
-        flair::gui::Tab *setup_sliding_controller, *graphs_sliding_controller;
 
         // Custom task
         flair::gui::ComboBox *task_selection;
@@ -127,8 +120,6 @@ class NNC : public flair::meta::UavStateMachine {
         flair::gui::DoubleSpinBox *esc_fault_motor_index, *esc_fault_percentage;
         int esc_fault_last_motor = -1;
         bool esc_fault_applied = false;
-        std::array<float, 4> esc_fault_base_power = {{1.0f, 1.0f, 1.0f, 1.0f}};
-        std::array<bool, 4> esc_fault_base_power_captured = {{false, false, false, false}};
 };
 
 #endif // NNC_H

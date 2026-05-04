@@ -82,7 +82,6 @@ NNC::NNC(TargetController *controller): UavStateMachine(controller), behaviourMo
     control_selection = new ComboBox(controlModeBox->NewRow(), "Control selection");
     control_selection->AddItem("Default");
     control_selection->AddItem("Custom controller");
-    control_selection->AddItem("Sliding + myCtrl PD");
 
     esc_fault_enabled = new CheckBox(controlModeBox->NewRow(), "Enable ESC fault", false);
     esc_fault_motor_index = new DoubleSpinBox(controlModeBox->NewRow(), "Failed motor index (1-4)", 1, 4, 1, 0, 1);
@@ -117,19 +116,10 @@ NNC::NNC(TargetController *controller): UavStateMachine(controller), behaviourMo
     setup_custom_controller = new Tab(tabs_custom_controller,"Setup");
     graphs_custom_controller = new Tab(tabs_custom_controller,"Graphs");
     xy_weights_custom_controller = new Tab(tabs_custom_controller,"XY Weights");
-    setup_sliding_controller = new Tab(tabs_custom_controller,"Sliding Setup");
-    graphs_sliding_controller = new Tab(tabs_custom_controller,"Sliding Graphs");
 
     myCtrl = new MyController(setup_custom_controller->At(0,0),"NNC");
     myCtrl->plotEstimatedMass(graphs_custom_controller->At(0,0));
     myCtrl->plotXYWeights(xy_weights_custom_controller->At(0,0));
-
-    slidingCtrl = new Sliding(setup_sliding_controller->At(0,0),"Sliding");
-    slidingCtrl->UseDefaultPlot(graphs_sliding_controller->At(0,0));
-    slidingCtrl->UseDefaultPlot2(graphs_sliding_controller->At(0,1));
-    slidingCtrl->UseDefaultPlot3(graphs_sliding_controller->At(1,0));
-    slidingCtrl->UseDefaultPlot4(graphs_sliding_controller->At(1,1));
-    slidingCtrl->UseDefaultPlot5(graphs_sliding_controller->At(2,0));
 
     customReferenceOrientation= new AhrsData(this,"reference");
     uav->GetAhrs()->AddPlot(customReferenceOrientation,DataPlot::Yellow);
@@ -137,7 +127,6 @@ NNC::NNC(TargetController *controller): UavStateMachine(controller), behaviourMo
     AddDeviceToControlLawLog(uX);
     AddDeviceToControlLawLog(uY);
     AddDeviceToControlLawLog(myCtrl);
-    AddDeviceToControlLawLog(slidingCtrl);
 
     customOrientation=new AhrsData(this,"orientation");
 }
@@ -161,24 +150,12 @@ void NNC::ComputeCustomTorques(Euler &torques)
             applyEscMotorFailure();
             break;
 
-        case 2:
-            controlMode_t = ControlMode_t::Sliding;
-            computeSlidingCtrl(torques);
-            ComputeCustomThrust();
-            applyEscMotorFailure();
-            break;
-
         default:
             controlMode_t = ControlMode_t::Default;
             Thread::Warn("NNC: default control law started. Check custom torque definition. \n");
             EnterFailSafeMode();
             break;
     }
-
-    // Independent from BLDC backend support, inject a virtual motor-loss effect
-    // directly in the commanded torques/thrust so the vehicle behaves as if one
-    // motor is slower.
-    applyVirtualMotorFailureToControl(torques);
 }
 
 void NNC::computeMyCtrl(Euler &torques)
@@ -217,7 +194,7 @@ void NNC::computeMyCtrl(Euler &torques)
 
     // Set the values of the custom controller and update it
     //myCtrl->SetValues(pos_error, vel_error, mixQuaternion, currentAngularSpeed, yaw_ref, acceleration2D.x, acceleration2D.y, 0.0f);
-    myCtrl->SetValues(pos_error, vel_error, Vector3Df(uav_pos.x, uav_pos.y, -uav_pos.z), mixQuaternion, currentAngularSpeed, yaw_ref, acceleration2D.x, acceleration2D.y, 0.0f);
+     myCtrl->SetValues(pos_error, vel_error, Vector3Df(uav_pos.x, uav_pos.y, -uav_pos.z), mixQuaternion, currentAngularSpeed, yaw_ref, acceleration2D.x, acceleration2D.y, 0.0f);
     myCtrl->Update(GetTime());
 
     // Apply the computed torques and thrust
@@ -228,119 +205,6 @@ void NNC::computeMyCtrl(Euler &torques)
     // If you prefer, you can also use the ComputeDefaultThrust() function. E.g.:
     // thrust = ComputeDefaultThrust();
     // The desired take-off altitude will be used as a reference. 
-}
-
-void NNC::computeSlidingCtrl(Euler &torques)
-{
-    // Hybrid mode: keep myCtrl position PD (mainly thrust and XY guidance),
-    // but close orientation loop with Sliding in quaternion form.
-    // Get position, velocity and quaternion from the VRPN object in its coordinate system
-    Vector3Df uav_pos, uav_vel; 
-    Quaternion vrpn_quaternion;
-    uavVrpn->GetPosition(uav_pos);
-    uavVrpn->GetSpeed(uav_vel);
-    uavVrpn->GetQuaternion(vrpn_quaternion);
-
-    // Get current orientation and angular speed from the AHRS object (IMU)
-    const AhrsData *currentOrientation = GetDefaultOrientation();
-    Quaternion currentQuaternion;
-    Vector3Df currentAngularRates;
-    currentOrientation->GetQuaternionAndAngularRates(currentQuaternion, currentAngularRates);
-    Vector3Df currentAngularSpeed = GetCurrentAngularSpeed();
-
-    // Use yaw from VRPN and roll, pitch from IMU
-    Euler ahrsEuler = currentQuaternion.ToEuler();
-    ahrsEuler.yaw = vrpn_quaternion.ToEuler().yaw;
-    Quaternion mixQuaternion = ahrsEuler.ToQuaternion();
-
-    // Compute the position and velocity errors in the UAV frame
-    Vector2Df pos_error2D, vel_error2D, acceleration2D;
-    // Example of desired altitude [m] => (ALWAYS A POSITIVE VALUE) 
-    // Because the AltitudeValues function returns a positive value also. However, the UAV's altitude is negative in the VRPN coordinate system.
-    float altittude_desired = desired_position->Value().z; 
-    float yaw_ref;
-    float z, dz;
-    AltitudeValues(z, dz);
-    PositionValues(pos_error2D, vel_error2D, yaw_ref, acceleration2D);
-    // Notice that the error definition is current - desired for x,y and z. 
-    float ze = z - altittude_desired;
-    Vector3Df pos_error = Vector3Df(pos_error2D.x, pos_error2D.y, ze);
-    Vector3Df vel_error = Vector3Df(vel_error2D.x, vel_error2D.y, dz);
-
-    // Set the values of the custom controller and update it
-    //myCtrl->SetValues(pos_error, vel_error, mixQuaternion, currentAngularSpeed, yaw_ref, acceleration2D.x, acceleration2D.y, 0.0f);
-    myCtrl->SetValues(pos_error, vel_error, Vector3Df(uav_pos.x, uav_pos.y, -uav_pos.z), mixQuaternion, currentAngularSpeed, yaw_ref, acceleration2D.x, acceleration2D.y, 0.0f);
-    myCtrl->Update(GetTime());
-
-    //const float roll_ref = std::max(-0.5f, std::min(0.5f, myCtrl->Output(3)));
-    //const float pitch_ref = std::max(-0.5f, std::min(0.5f, myCtrl->Output(4)));
-    //const Euler desiredEuler(roll_ref, pitch_ref, desired_yaw->Value());
-
-    // const Quaternion desiredQuaternion = desiredEuler.ToQuaternion();
-    //const Quaternion desiredQuaternion(1, 0, 0, 0); // For testing the sliding controller in attitude only, we set a fixed desired quaternion.
-    //const Vector3Df wd(0.0f, 0.0f, 0.0f);
-
-    /////////////////////////////////////////
-
-    const float kEps = std::max(1e-8F, slidingCtrl->ReferenceEpsilon());
-    const Eigen::Vector3f ez(0.0F, 0.0F, 1.0F);
-
-    // Subactuated reference construction from the commanded virtual force u.
-    // myCtrl outputs 4/5 are reused as horizontal virtual-force components.
-    const float thrust_cmd = myCtrl->Output(3);
-    // myCtrl exposes virtual-force components in outputs 4/5 and thrust in output 3.
-    // thrust is typically negative in flight, so -thrust_cmd is used as positive body-z lift component.
-    const Eigen::Vector3f u(myCtrl->Output(4), myCtrl->Output(5), -thrust_cmd);
-    const Eigen::Vector3f up(acceleration2D.x, acceleration2D.y, 0.0F);
-
-    const float u_norm = u.norm();
-    const Eigen::Vector3f uh = (u_norm > kEps) ? (u / u_norm) : ez;
-    Eigen::Vector3f uph = Eigen::Vector3f::Zero();
-    if (u_norm > kEps) {
-        const float u_norm2 = u_norm * u_norm;
-        const float u_dot_up = u.dot(up);
-        uph = (u_norm2 * up - u_dot_up * u) / (u_norm2 * u_norm);
-    }
-
-    const float denom_base = (-2.0F * uh(2)) + 2.0F;
-    const float denom = std::max(denom_base, kEps);
-    const float denom_sqrt = sqrtf(denom);
-    const float inv_denom_sqrt = 1.0F / denom_sqrt;
-    const float inv_denom_3_2 = 1.0F / (denom * denom_sqrt);
-
-    Eigen::Quaternionf qd_tilt(0.5F * denom_sqrt, uh(1) * inv_denom_sqrt, -uh(0) * inv_denom_sqrt, 0);
-    Eigen::Quaternionf qdp_tilt(-(0.5F) * (uph(2) * inv_denom_sqrt),
-                                 (uph(1) * inv_denom_sqrt) + ((uh(1) * uph(2)) * inv_denom_3_2),
-                                 -(uph(0) * inv_denom_sqrt) - ((uh(0) * uph(2)) * inv_denom_3_2),
-                                 0);
-
-    // Keep yaw-reference behavior from the previous PD attitude path.
-    const float yaw_des = yaw_ref;
-    const Eigen::AngleAxisf yaw_axis(yaw_des, Eigen::Vector3f::UnitZ());
-    Eigen::Quaternionf q_yaw(yaw_axis);
-
-    // Apply yaw as a rotation around the thrust-aligned axis (post-multiply)
-    // so XY force-direction tracking from qd_tilt is preserved.
-    Eigen::Quaternionf qd = qd_tilt * q_yaw;
-    if (qd.norm() > kEps) {
-        qd.normalize();
-    }
-    const Quaternion desiredQuaternion(qd.w(), qd.x(), qd.y(), qd.z());
-
-    const Eigen::Quaternionf qd_tilt_conj = qd_tilt.conjugate();
-    Eigen::Vector3f wd_tilt = 2.0F * (qd_tilt_conj * qdp_tilt).vec();
-    Eigen::Vector3f wd_eigen = wd_tilt;
-    const Vector3Df wd(wd_eigen(0), wd_eigen(1), wd_eigen(2));
-
-
-    slidingCtrl->SetValues(ze, dz, currentAngularRates, wd, currentQuaternion, desiredQuaternion);
-    slidingCtrl->Update(GetTime());
-
-    torques.roll = slidingCtrl->Output(0);
-    torques.pitch = slidingCtrl->Output(1);
-    torques.yaw = slidingCtrl->Output(2);
-    thrust = myCtrl->Output(3); 
-    // keep thrust from myCtrl position loop
 }
 
 void NNC::applyEscMotorFailure(void)
@@ -374,86 +238,12 @@ void NNC::applyEscMotorFailure(void)
 
     if(esc_fault_applied && esc_fault_last_motor != failed_motor)
     {
-        if(esc_fault_last_motor >= 0 && esc_fault_last_motor <= 3)
-        {
-            uav->GetBldc()->SetPower(esc_fault_last_motor, esc_fault_base_power[esc_fault_last_motor]);
-        }
+        uav->GetBldc()->SetPower(esc_fault_last_motor, 1.0f);
     }
 
-    // Capture a base value once and always apply the fault relative to that base.
-    // If BLDC readback is not available here, we fallback to nominal power 1.0.
-    if(!esc_fault_base_power_captured[failed_motor])
-    {
-        esc_fault_base_power[failed_motor] = 1.0f;
-        esc_fault_base_power_captured[failed_motor] = true;
-    }
-
-    float target_power = esc_fault_base_power[failed_motor] * (1.0f - failure);
-    target_power = std::max(0.0f, std::min(1.0f, target_power));
-    uav->GetBldc()->SetPower(failed_motor, target_power);
+    uav->GetBldc()->SetPower(failed_motor, 1.0f - failure);
     esc_fault_last_motor = failed_motor;
     esc_fault_applied = true;
-}
-
-void NNC::applyVirtualMotorFailureToControl(Euler &torques)
-{
-    if(!esc_fault_enabled->Value())
-    {
-        return;
-    }
-
-    float failure = static_cast<float>(esc_fault_percentage->Value()) / 100.0f;
-    failure = std::max(0.0f, std::min(1.0f, failure));
-    if(failure <= 0.0f)
-    {
-        return;
-    }
-
-    int failed_motor = static_cast<int>(esc_fault_motor_index->Value() + 0.5f) - 1;
-    if(failed_motor < 0 || failed_motor > 3)
-    {
-        return;
-    }
-
-    // Quad-X approximation of motor-loss effects:
-    // - less collective lift
-    // - roll/pitch bias toward failed corner
-    // - yaw imbalance from CW/CCW pair mismatch
-    const float lift_loss = 0.35f * failure;   // 35% at full failure
-    const float att_bias = 0.25f * failure;    // rad-equivalent control bias
-    const float yaw_bias = 0.15f * failure;
-
-    // In this codebase thrust is typically <= 0 in flight (see myCtrl saturation).
-    if(thrust < 0.0f)
-    {
-        thrust *= (1.0f - lift_loss);
-    }
-
-    switch (failed_motor)
-    {
-        case 0: // front-left
-            torques.roll  += att_bias;
-            torques.pitch += att_bias;
-            torques.yaw   += yaw_bias;
-            break;
-        case 1: // front-right
-            torques.roll  -= att_bias;
-            torques.pitch += att_bias;
-            torques.yaw   -= yaw_bias;
-            break;
-        case 2: // rear-left
-            torques.roll  += att_bias;
-            torques.pitch -= att_bias;
-            torques.yaw   -= yaw_bias;
-            break;
-        case 3: // rear-right
-            torques.roll  -= att_bias;
-            torques.pitch -= att_bias;
-            torques.yaw   += yaw_bias;
-            break;
-        default:
-            break;
-    }
 }
 
 void NNC::clearEscMotorFailure(void)
@@ -466,7 +256,7 @@ void NNC::clearEscMotorFailure(void)
 
     if(esc_fault_last_motor >= 0 && esc_fault_last_motor <= 3)
     {
-        uav->GetBldc()->SetPower(esc_fault_last_motor, esc_fault_base_power[esc_fault_last_motor]);
+        uav->GetBldc()->SetPower(esc_fault_last_motor, 1.0f);
     }
     esc_fault_last_motor = -1;
     esc_fault_applied = false;

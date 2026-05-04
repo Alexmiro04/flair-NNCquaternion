@@ -23,7 +23,7 @@ using namespace flair::core;
 using namespace flair::gui;
 using namespace flair::filter;
 
-MyController::MyController(const LayoutPosition *position, const string &name) : ControlLaw(position->getLayout(),name,6)
+MyController::MyController(const LayoutPosition *position, const string &name) : ControlLaw(position->getLayout(),name,4)
 {
     first_update = true;
     kf_initialized = false;
@@ -413,7 +413,7 @@ void MyController::UpdateFrom(const io_data *data)
     if(motor_const < 1e-6f) motor_const = 1e-6f;
 
     float estimator_thrust = -thrust * motor_const; // magnitud (o proporcional)
-    float u_eff = estimator_thrust;// * R33;           // empuje vertical efectivo
+    float u_eff = estimator_thrust * R33;           // empuje vertical efectivo
 
     updateMassEstimator(delta_t, u_eff, nuz, actual_acc_z);
 
@@ -425,8 +425,6 @@ void MyController::UpdateFrom(const io_data *data)
     output->SetValue(1, 0, tau.y);
     output->SetValue(2, 0, tau.z);
     output->SetValue(3, 0, thrust);
-    output->SetValue(4, 0, u.x);
-    output->SetValue(5, 0, u.y);
     output->SetDataTime(data->DataTime());
     
     // Log state (example).

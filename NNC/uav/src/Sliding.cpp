@@ -107,10 +107,11 @@ void Sliding::Reset(void) {
     sgnori << 0,0,0;
 
     state->GetMutex();
-    for (int i = 0; i < 7; ++i) {
-        state->SetValueNoMutex(i, 0, 0.0F);
-    }
-    // state->ReleaseMutex();
+    for (int i = 0; i < 7; ++i) 
+        {
+            state->SetValueNoMutex(i, 0, 0.0F);
+        }
+    state->ReleaseMutex();
 
     // output->SetValue(0, 0, 0.0F);
     // output->SetValue(1, 0, 0.0F);
