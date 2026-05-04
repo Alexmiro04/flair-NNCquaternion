@@ -413,7 +413,7 @@ void MyController::UpdateFrom(const io_data *data)
     if(motor_const < 1e-6f) motor_const = 1e-6f;
 
     float estimator_thrust = -thrust * motor_const; // magnitud (o proporcional)
-    float u_eff = estimator_thrust * R33;           // empuje vertical efectivo
+    float u_eff = estimator_thrust;// * R33;           // empuje vertical efectivo
 
     updateMassEstimator(delta_t, u_eff, nuz, actual_acc_z);
 

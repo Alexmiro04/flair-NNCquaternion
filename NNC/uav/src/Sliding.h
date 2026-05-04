@@ -75,6 +75,7 @@ public:
     void UseDefaultPlot5(const flair::gui::LayoutPosition *position);
     void UseDefaultPlot6(const flair::gui::LayoutPosition *position);
     void UseDefaultPlot7(const flair::gui::LayoutPosition *position);
+    float ReferenceEpsilon(void) const;
     
     flair::core::Time t0;
 
@@ -83,7 +84,7 @@ private:
 
 
     flair::gui::DoubleSpinBox *T, *k1, *k2, *gamma, *alpha, *k, *Kd, *sat_r, *sat_p, *sat_y, *sat_t, *m, *g, *km, *p;
-    flair::gui::DoubleSpinBox *alpha_roll, *alpha_pitch, *alpha_yaw;
+    flair::gui::DoubleSpinBox *alpha_roll, *alpha_pitch, *alpha_yaw, *eps_ref;
     flair::gui::DoubleSpinBox *gamma_roll, *gamma_pitch, *gamma_yaw;
     flair::gui::DoubleSpinBox *Kd_roll, *Kd_pitch, *Kd_yaw;
 

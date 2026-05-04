@@ -74,6 +74,7 @@ Sliding::Sliding(const LayoutPosition *position, string name): ControlLaw(positi
     Kd_roll = new DoubleSpinBox(ori->NewRow(), "Kd_roll:", 0, 50000, 0.5, 3);
     Kd_pitch = new DoubleSpinBox(ori->LastRowLastCol(), "Kd_pitch:", 0, 50000, 0.5, 3);
     Kd_yaw = new DoubleSpinBox(ori->LastRowLastCol(), "Kd_yaw:", 0, 50000, 0.5, 3);
+    eps_ref = new DoubleSpinBox(ori->NewRow(), "k_eps ref:", 1e-8, 20, 1e-6, 6);
     sat_r = new DoubleSpinBox(mot->NewRow(), "sat roll:", 0, 1, 0.1);
     sat_p = new DoubleSpinBox(mot->LastRowLastCol(), "sat pitch:", 0, 1, 0.1);
     sat_y = new DoubleSpinBox(mot->LastRowLastCol(), "sat yaw:", 0, 1, 0.1);
@@ -354,6 +355,9 @@ float Sliding::Sat(float value, float borne) {
   return value;
 }
 
+float Sliding::ReferenceEpsilon(void) const {
+    return static_cast<float>(eps_ref->Value());
+}
 
 } // end namespace filter
 } // end namespace flair

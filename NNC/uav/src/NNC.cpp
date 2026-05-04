@@ -272,13 +272,66 @@ void NNC::computeSlidingCtrl(Euler &torques)
     myCtrl->SetValues(pos_error, vel_error, Vector3Df(uav_pos.x, uav_pos.y, -uav_pos.z), mixQuaternion, currentAngularSpeed, yaw_ref, acceleration2D.x, acceleration2D.y, 0.0f);
     myCtrl->Update(GetTime());
 
-    const float roll_ref = std::max(-0.5f, std::min(0.5f, myCtrl->Output(3)));
-    const float pitch_ref = std::max(-0.5f, std::min(0.5f, myCtrl->Output(4)));
-    const Euler desiredEuler(roll_ref, pitch_ref, desired_yaw->Value());
+    //const float roll_ref = std::max(-0.5f, std::min(0.5f, myCtrl->Output(3)));
+    //const float pitch_ref = std::max(-0.5f, std::min(0.5f, myCtrl->Output(4)));
+    //const Euler desiredEuler(roll_ref, pitch_ref, desired_yaw->Value());
 
     // const Quaternion desiredQuaternion = desiredEuler.ToQuaternion();
-    const Quaternion desiredQuaternion(1, 0, 0, 0); // For testing the sliding controller in attitude only, we set a fixed desired quaternion.
-    const Vector3Df wd(0.0f, 0.0f, 0.0f);
+    //const Quaternion desiredQuaternion(1, 0, 0, 0); // For testing the sliding controller in attitude only, we set a fixed desired quaternion.
+    //const Vector3Df wd(0.0f, 0.0f, 0.0f);
+
+    /////////////////////////////////////////
+
+    const float kEps = std::max(1e-8F, slidingCtrl->ReferenceEpsilon());
+    const Eigen::Vector3f ez(0.0F, 0.0F, 1.0F);
+
+    // Subactuated reference construction from the commanded virtual force u.
+    // myCtrl outputs 4/5 are reused as horizontal virtual-force components.
+    const float thrust_cmd = myCtrl->Output(3);
+    // myCtrl exposes virtual-force components in outputs 4/5 and thrust in output 3.
+    // thrust is typically negative in flight, so -thrust_cmd is used as positive body-z lift component.
+    const Eigen::Vector3f u(myCtrl->Output(4), myCtrl->Output(5), -thrust_cmd);
+    const Eigen::Vector3f up(acceleration2D.x, acceleration2D.y, 0.0F);
+
+    const float u_norm = u.norm();
+    const Eigen::Vector3f uh = (u_norm > kEps) ? (u / u_norm) : ez;
+    Eigen::Vector3f uph = Eigen::Vector3f::Zero();
+    if (u_norm > kEps) {
+        const float u_norm2 = u_norm * u_norm;
+        const float u_dot_up = u.dot(up);
+        uph = (u_norm2 * up - u_dot_up * u) / (u_norm2 * u_norm);
+    }
+
+    const float denom_base = (-2.0F * uh(2)) + 2.0F;
+    const float denom = std::max(denom_base, kEps);
+    const float denom_sqrt = sqrtf(denom);
+    const float inv_denom_sqrt = 1.0F / denom_sqrt;
+    const float inv_denom_3_2 = 1.0F / (denom * denom_sqrt);
+
+    Eigen::Quaternionf qd_tilt(0.5F * denom_sqrt, uh(1) * inv_denom_sqrt, -uh(0) * inv_denom_sqrt, 0);
+    Eigen::Quaternionf qdp_tilt(-(0.5F) * (uph(2) * inv_denom_sqrt),
+                                 (uph(1) * inv_denom_sqrt) + ((uh(1) * uph(2)) * inv_denom_3_2),
+                                 -(uph(0) * inv_denom_sqrt) - ((uh(0) * uph(2)) * inv_denom_3_2),
+                                 0);
+
+    // Keep yaw-reference behavior from the previous PD attitude path.
+    const float yaw_des = yaw_ref;
+    const Eigen::AngleAxisf yaw_axis(yaw_des, Eigen::Vector3f::UnitZ());
+    Eigen::Quaternionf q_yaw(yaw_axis);
+
+    // Apply yaw as a rotation around the thrust-aligned axis (post-multiply)
+    // so XY force-direction tracking from qd_tilt is preserved.
+    Eigen::Quaternionf qd = qd_tilt * q_yaw;
+    if (qd.norm() > kEps) {
+        qd.normalize();
+    }
+    const Quaternion desiredQuaternion(qd.w(), qd.x(), qd.y(), qd.z());
+
+    const Eigen::Quaternionf qd_tilt_conj = qd_tilt.conjugate();
+    Eigen::Vector3f wd_tilt = 2.0F * (qd_tilt_conj * qdp_tilt).vec();
+    Eigen::Vector3f wd_eigen = wd_tilt;
+    const Vector3Df wd(wd_eigen(0), wd_eigen(1), wd_eigen(2));
+
 
     slidingCtrl->SetValues(ze, dz, currentAngularRates, wd, currentQuaternion, desiredQuaternion);
     slidingCtrl->Update(GetTime());
