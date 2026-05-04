@@ -1,0 +1,113 @@
+// %flair:license{
+// This file is part of the Flair framework distributed under the
+// CECILL-C License, Version 1.0.
+// %flair:license}
+/*!
+ * \file Sliding.h
+ * \brief Class defining a Sliding mode controller
+ * \author Sergio Urzua, Copyright Heudiasyc UMR UTC/CNRS 7253
+ * \date 2011/05/01
+ * \version 2.0
+ */
+
+#ifndef SLIDING_H
+#define SLIDING_H
+
+#include <Object.h>
+#include <ControlLaw.h>
+#include <Vector3D.h>
+#include <Eigen/Core>
+#include <Eigen/Geometry>
+
+namespace flair {
+    namespace core {
+        class Matrix;
+        class io_data;
+    }
+    namespace gui {
+        class LayoutPosition;
+        class DoubleSpinBox;
+        class CheckBox;
+        class Label;
+    }
+    namespace filter {
+    }
+}
+
+/*! \class Sliding
+* \brief Class defining a Sliding
+*/
+
+    
+    
+namespace flair {
+    namespace filter {
+    /*! \class Sliding
+    *
+    * \brief Class defining a Sliding
+    */
+        class Sliding : public ControlLaw {
+    
+    
+public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    Sliding(const flair::gui::LayoutPosition *position, std::string name);
+    ~Sliding();
+    void UpdateFrom(const flair::core::io_data *data);
+    void Reset(void);
+    
+    /*!
+  * \brief Set input values
+  *
+  * \param ze Error en z
+  * \param zp Error en zp
+  * \param w  Velocidad angular actual
+  * \param wd Velocidad angular deseada
+  * \param q  Cuaternio actual
+  * \param qd Cuaternio deseado
+  */
+    void SetValues(float ze, float zp, flair::core::Vector3Df w, flair::core::Vector3Df wd, flair::core::Quaternion q, flair::core::Quaternion qd);
+    
+    void UseDefaultPlot(const flair::gui::LayoutPosition *position);
+    void UseDefaultPlot2(const flair::gui::LayoutPosition *position);
+    void UseDefaultPlot3(const flair::gui::LayoutPosition *position);
+    void UseDefaultPlot4(const flair::gui::LayoutPosition *position);
+    void UseDefaultPlot5(const flair::gui::LayoutPosition *position);
+    void UseDefaultPlot6(const flair::gui::LayoutPosition *position);
+    void UseDefaultPlot7(const flair::gui::LayoutPosition *position);
+    
+    flair::core::Time t0;
+
+private:
+    flair::core::Matrix *state;
+
+
+    flair::gui::DoubleSpinBox *T, *k1, *k2, *gamma, *alpha, *k, *Kd, *sat_r, *sat_p, *sat_y, *sat_t, *m, *g, *km, *p;
+    flair::gui::DoubleSpinBox *alpha_roll, *alpha_pitch, *alpha_yaw;
+    flair::gui::DoubleSpinBox *gamma_roll, *gamma_pitch, *gamma_yaw;
+    flair::gui::DoubleSpinBox *Kd_roll, *Kd_pitch, *Kd_yaw;
+
+    flair::gui::Label *lo;
+    
+    float Sat(float value, float borne);
+    
+    float delta_t;
+    
+    bool first_update;
+    
+    Eigen::Vector3f sgnori_p, sgnori;
+    Eigen::Vector3f nu_t0;
+
+    static void saturate(Eigen::Vector3f& vec, Eigen::Vector3f min_val, Eigen::Vector3f max_val) {
+        for (int i = 0; i < vec.size(); ++i) {
+            vec(i) = std::min(vec(i), max_val(i)); 
+            vec(i) = std::max(vec(i), min_val(i));
+        }
+    }
+    
+    
+};
+} // end namespace filter
+} // end namespace flair
+
+#endif // LINEAR_H
