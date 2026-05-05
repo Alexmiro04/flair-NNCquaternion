@@ -2,6 +2,7 @@
 #include <Matrix.h>
 #include <Vector3D.h>
 #include <TabWidget.h>
+#include <Tab.h>
 #include <ComboBox.h>
 #include <Quaternion.h>
 #include <Layout.h>
@@ -17,6 +18,8 @@
 #include <Vector3DSpinBox.h>
 #include <Pid.h>
 #include <random>
+#include <Eigen/Core>
+#include <Eigen/Geometry>
 
 using std::string;
 using namespace flair::core;
@@ -113,7 +116,11 @@ MyController::MyController(const LayoutPosition *position, const string &name) :
     delete log_labels;
 
     // GUI for custom PID
-    GroupBox *gui_customPID = new GroupBox(position, name);
+    auto *controller_tabs = new TabWidget(position, "Controller setup");
+    Tab *setup_pos_tab = new Tab(controller_tabs, "Setup Pos");
+    Tab *setup_orientation_tab = new Tab(controller_tabs, "Setup Orientation");
+
+    GroupBox *gui_customPID = new GroupBox(setup_pos_tab->At(0,0), name);
     GroupBox *general_parameters = new GroupBox(gui_customPID->NewRow(), "General parameters");
     deltaT_custom = new DoubleSpinBox(general_parameters->NewRow(), "Custom dt [s]", 0, 1, 0.001, 4);
     k_motor = new DoubleSpinBox(general_parameters->LastRowLastCol(), "Motor constant", 0, 50, 0.01, 4, 29.5870);
@@ -173,8 +180,13 @@ MyController::MyController(const LayoutPosition *position, const string &name) :
     Kp_pos = new Vector3DSpinBox(custom_position->NewRow(), "Kp_pos", 0, 100, 0.1, 3);
     Kd_pos = new Vector3DSpinBox(custom_position->LastRowLastCol(), "Kd_pos", 0, 100, 0.1, 3);
     
-    // Custom attitude controller
-    GroupBox *custom_attitude = new GroupBox(gui_customPID->NewRow(), "Custom attitude controller");
+    GroupBox *orientation_selector_group = new GroupBox(setup_orientation_tab->At(0,0), "Orientation mode");
+    orientation_mode_selection = new ComboBox(orientation_selector_group->NewRow(), "Orientation controller");
+    orientation_mode_selection->AddItem("PD Euler");
+    orientation_mode_selection->AddItem("PD Quaternion");
+
+    // Custom attitude controller (PD Euler)
+    GroupBox *custom_attitude = new GroupBox(orientation_selector_group->NewRow(), "PD Euler attitude");
     Kp_att = new Vector3DSpinBox(custom_attitude->NewRow(), "Kp_att", 0, 100, 0.1, 3);
     Kd_att = new Vector3DSpinBox(custom_attitude->LastRowLastCol(), "Kd_att", 0, 100, 0.1, 3);
 
@@ -261,13 +273,78 @@ void MyController::UpdateFrom(const io_data *data)
     control_effort.Saturate(sat_pos->Value());
     u = control_effort;
 
-    // Attitude custom controller
     Euler rpy = q.ToEuler();
-    tau.x = Kp_att_val.x*(rpy.roll + u.y) + Kd_att_val.x*omega.x;
-    tau.y = Kp_att_val.y*(rpy.pitch - u.x) + Kd_att_val.y*omega.y;
-    tau.z = Kp_att_val.z*(rpy.YawDistanceFrom(yaw_ref)) + Kd_att_val.z*omega.z;
-    applyMotorConstant(tau);
-    tau.Saturate(sat_att->Value());
+
+    // Attitude controller selection
+    if(orientation_mode_selection->CurrentIndex() == 1)
+    {
+        /*
+        * Quaternion PD compatible with the previous Euler PD convention.
+        *
+        * Previous Euler controller:
+        * tau.x = Kp_roll  * (roll  + u.y) + Kd_roll  * omega.x
+        * tau.y = Kp_pitch * (pitch - u.x) + Kd_pitch * omega.y
+        * tau.z = Kp_yaw   * yaw_error     + Kd_yaw   * omega.z
+        *
+        * Therefore:
+        * roll_ref  = -u.y
+        * pitch_ref =  u.x
+        * yaw_ref   = yaw_ref
+        */
+
+        float max_tilt = 0.35f; // about 20 degrees. Adjust later.
+
+        float roll_ref  = std::max(-max_tilt, std::min(max_tilt, -u.y));
+        float pitch_ref = std::max(-max_tilt, std::min(max_tilt,  u.x));
+        float yaw_des   = std::atan2(std::sin(yaw_ref), std::cos(yaw_ref));
+
+        Euler desiredEuler;
+        desiredEuler.roll  = roll_ref;
+        desiredEuler.pitch = pitch_ref;
+        desiredEuler.yaw   = yaw_des;
+
+        Quaternion qd_flair = desiredEuler.ToQuaternion();
+
+        Eigen::Quaternionf qd(qd_flair.q0, qd_flair.q1, qd_flair.q2, qd_flair.q3);
+        Eigen::Quaternionf q_curr(q.q0, q.q1, q.q2, q.q3);
+
+        if(qd.norm() > 1e-6f) {
+            qd.normalize();
+        }
+
+        if(q_curr.norm() > 1e-6f) {
+            q_curr.normalize();
+        }
+
+        Eigen::Quaternionf qe = qd.conjugate() * q_curr;
+
+        if(qe.w() < 0.0f) {
+            qe.coeffs() *= -1.0f;
+        }
+
+        Eigen::Vector3f e_q = 2.0f * qe.vec();
+
+        /*
+        * Important:
+        * Keep the same sign convention as your Euler PD.
+        * Do NOT use the standard textbook negative sign unless you also
+        * verify the FLAIR torque convention.
+        */
+        tau.x = Kp_att_val.x * e_q(0) + Kd_att_val.x * omega.x;
+        tau.y = Kp_att_val.y * e_q(1) + Kd_att_val.y * omega.y;
+        tau.z = Kp_att_val.z * e_q(2) + Kd_att_val.z * omega.z;
+
+        applyMotorConstant(tau);
+        tau.Saturate(sat_att->Value());
+    }
+    else
+    {
+        tau.x = Kp_att_val.x*(rpy.roll + u.y) + Kd_att_val.x*omega.x;
+        tau.y = Kp_att_val.y*(rpy.pitch - u.x) + Kd_att_val.y*omega.y;
+        tau.z = Kp_att_val.z*(rpy.YawDistanceFrom(yaw_ref)) + Kd_att_val.z*omega.z;
+        applyMotorConstant(tau);
+        tau.Saturate(sat_att->Value());
+    }
 
     // Compute custom thrust
     thrust = ctrl_z; // This is the thrust needed to counteract gravity and control the z position

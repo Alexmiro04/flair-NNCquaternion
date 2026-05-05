@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+
 namespace flair {
     namespace core {
         class Matrix;
@@ -59,7 +60,7 @@ namespace flair {
                 flair::gui::DoubleSpinBox *deltaT_custom, *k_motor, *sat_pos, *sat_att, *sat_thrust;
                 flair::gui::DoubleSpinBox *nn_hidden_neurons, *nn_weight_std, *nn_learning_rate, *nn_regularization;
                 flair::gui::DoubleSpinBox *nn_eps0, *nn_u_nom, *nn_nu_nom, *nn_mass_min, *nn_mass_max, *nn_use_nlms;
-                flair::gui::ComboBox *mass_source_selection;
+                flair::gui::ComboBox *mass_source_selection, *orientation_mode_selection;
                 flair::gui::DoubleSpinBox *nominal_mass;
                 flair::gui::DoubleSpinBox *kf_q, *kf_sigma_e, *kf_sigma_edot, *kf_sigma_eddot;
                 flair::gui::DoubleSpinBox *xy_nn_enable, *xy_nn_hidden_neurons, *xy_nn_weight_std;
